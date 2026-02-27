@@ -126,33 +126,54 @@ contains
     ! `config`. It performs the following steps:
     ! - Checks `a`, `rin`, `h` are in bounds.
     ! - Sets the inner radius to the ISCO.
+    ! - Warns user when parameters are adjusted
     subroutine arguments_check(config, model_args)
         type(t_config), intent(inout) :: config
         type(t_model_arguments), intent(inout) :: model_args
         integer :: i
-        double precision :: disco
+        double precision :: disco, original_value
 
-        ! TODO: should this be printing if it modifies the input parameters?
-        ! some kind of warning perhaps?
+        ! Check and adjust spin parameter
         if (abs(model_args%a) .gt. 0.999) then
+            original_value = model_args%a
             model_args%a = sign(model_args%a,1.d0) * 0.999
+            write(*,'(A,F8.5,A,F8.5)') 'Warning: Spin parameter |a| > 0.999. Adjusted from ', &
+                original_value, ' to ', model_args%a
         end if
+        
         config%rmin = disco(model_args%a)
         config%rh = 1.d0+sqrt(1.d0-model_args%a**2)
+        
+        ! Check and adjust inner radius (negative values)
         if (model_args%rin .lt. 0.d0) then
+            original_value = model_args%rin
             model_args%rin = abs(model_args%rin) * config%rmin
+            write(*,'(A,F8.3,A,F8.3)') 'Warning: Negative rin detected. Adjusted from ', &
+                original_value, ' to ', model_args%rin
         end if
+        
+        ! Check and adjust inner radius (below ISCO)
         if (model_args%rin .lt. config%rmin)then
-            write(*,*)"Warning! rin<ISCO! Set to ISCO"
+            original_value = model_args%rin
             model_args%rin = config%rmin
+            write(*,'(A,F8.3,A,F8.3,A)') 'Warning: rin < ISCO. Adjusted from ', &
+                original_value, ' to ISCO at ', config%rmin, ' Rg'
         end if
+        
+        ! Check and adjust lamp post heights
         do i=1,model_args%nlp
             if (model_args%h(i) .lt. 0.d0) then
+                original_value = model_args%h(i)
                 model_args%h(i) = abs(model_args%h(i)) * config%rh
+                write(*,'(A,I1,A,F8.3,A,F8.3)') 'Warning: Negative h(', i, &
+                    ') detected. Adjusted from ', original_value, ' to ', model_args%h(i)
             end if
             if (model_args%h(i) .lt. 1.5d0*config%rh)then
-                write(*,*)"Warning! h<1.5*rh! Set to 1.5*rh"
+                original_value = model_args%h(i)
                 model_args%h(i) = 1.5d0 * config%rh
+                write(*,'(A,I1,A,F8.3,A,F8.3,A)') 'Warning: h(', i, &
+                    ') < 1.5*rh. Adjusted from ', original_value, ' to ', &
+                    model_args%h(i), ' Rg'
             end if
         end do
     end subroutine arguments_check
