@@ -29,7 +29,14 @@ type_int_p    = ct.POINTER(ct.c_int)
 # sys.path.append(path_to_location_of_this_file)
 #######################################################################
 
-lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + "/lib_reltrans.so")
+# Try multiple library paths
+try:
+    lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + "/build/lib/libreltrans.so")
+except OSError:
+    try:
+        lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + "/lib_reltrans.so")
+    except OSError:
+        lib = ct.cdll.LoadLibrary(os.path.dirname(__file__) + "/build/lib/libreltrans.dylib")
 
 #######################################################################
 # now the function(s)

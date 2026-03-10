@@ -722,19 +722,18 @@ subroutine initmatrix
 !Get name of response file and arf file
   respname = strenv(rmfenv)
   arfname  = strenv(arfenv)        
-!If this is not set, ask for it
+!If this is not set, skip response matrix (non-interactive mode)
   if( trim(respname) .eq. 'none' )then
-     write(*,*)"Enter name of the response file (with full path)"
-     read(*,'(a)') respname
+     needresp = .true.
+     return
   end if
 !Check if I need the arf
   call arfcheck(respname,arf)
 !Look for arf
   if( arf )then
-     !If not defined, ask for it
+     !If not defined, skip (non-interactive mode)
      if( trim(arfname) .eq. 'none' )then
-        write(*,*)"Enter name of the anciliary (arf) response file (with full path)"
-        read(*,'(a)')arfname
+        arf = .false.
      end if
   end if
 
@@ -775,19 +774,18 @@ subroutine initmatrix2
   ! write(*,*) 'name of the second response', trim(respname2) 
   ! write(*,*) 'name of the second arf', trim(arfname2)
   ! read(*,*) 
-!If this is not set, ask for it
+!If this is not set, skip response matrix (non-interactive mode)
   if( trim(respname2) .eq. 'none' )then
-     write(*,*)"Enter name of the second response file (with full path)"
-     read(*,'(a)') respname2
+     needresp2 = .true.
+     return
   end if
   !Check if I need the arf
   call arfcheck(respname2, arf2)
 !Look for arf
   if( arf2 )then
-     !If not defined, ask for it
+     !If not defined, skip (non-interactive mode)
      if( trim(arfname2) .eq. 'none' )then
-        write(*,*)"Enter name of the second anciliary (arf) response file (with full path)"
-        read(*,'(a)') arfname2
+        arf2 = .false.
      end if
   end if
 
