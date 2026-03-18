@@ -32,6 +32,7 @@ subroutine rtrans(verbose,dset,nlp,spin,h,mu0,Gamma,rin,rout,honr,d,rnmax,zcos,b
     ! ker_W3(nlp,ne,nf,me,xe)  Transfer function W3 - ionization variations
     ! frobs                 Observer's reflection fraction
     ! frrel                 Reflection fraction defined by relxilllp
+    use common_types
     use dyn_gr
     use blcoordinate
     use radial_grids
@@ -60,6 +61,7 @@ subroutine rtrans(verbose,dset,nlp,spin,h,mu0,Gamma,rin,rout,honr,d,rnmax,zcos,b
     double precision lximax
     double precision eta_0
     logical dotrace
+    type(t_model_arguments) :: model_args_local
 
     !new stuff - move back above once it's implemented properly    
     complex ker_W0(nlp,ne,nf,me,xe),ker_W1(nlp,ne,nf,me,xe),ker_W2(nlp,ne,nf,me,xe),ker_W3(nlp,ne,nf,me,xe)
@@ -166,7 +168,13 @@ subroutine rtrans(verbose,dset,nlp,spin,h,mu0,Gamma,rin,rout,honr,d,rnmax,zcos,b
     frobs    = 0.0 !Initialised observer's reflection fraction
 
     ! Calculate dcos/dr and time lags vs r for the lamppost model
-    call getdcos(spin,h,mudisk,ndelta,nlp,rout,npts,rlp,dcosdr,tlp,cosd,cosdout) 
+    ! Construct a temporary model_args for getdcos (rtrans itself will be
+    ! refactored in PR #94 to take model_args directly)
+    model_args_local%a = spin
+    model_args_local%h = h
+    model_args_local%nlp = nlp
+    model_args_local%rout = rout
+    call getdcos(model_args_local, mudisk, cosdout)
 
     !set continuum normalisations depending on model flavour 
     if( dset .eq. 0 )then
