@@ -4,27 +4,70 @@ module common_types
     ! this should be moved so that all of the wrappers pass the following
     ! instead of a params array
     type :: t_model_arguments
-        ! these are hardcoded with a fixed size of 2, since nlp <= 2. by not
-        ! havin them be pointers or dynamically allocated, it makes reasoning
+        ! These are hardcoded with a fixed size of 2, since nlp <= 2. by not
+        ! having them be pointers or dynamically allocated, it makes reasoning
         ! about the code a little easier.
         double precision :: h(2)
         real :: DelAB(2), g(2)
-        double precision :: a, inc, rin, rout, zcos, Gamma, honr
+        ! Black hole spin (dimensionless):
+        double precision :: a
+        ! Observer inclination in degrees:
+        double precision :: inc
+        ! Inner and outer radii of the accretion disc (rg):
+        double precision :: rin, rout
+        ! Scale height of the accretion disc
+        double precision :: honr
+        ! Cosmological redshift:
+        double precision :: zcos
+        ! Photon index
+        double precision :: Gamma
         real :: logxi, Afe, lognep, Cutoff_obs, Cutoff_s, Dkpc, Anorm, beta_p
         real :: Nh, boost, Mass, floHz, fhiHz, DelA
         integer :: nlp, ReIm, resp_matr, Cp
-        double precision :: qboost, b1, b2, eta, eta_0
+
+        ! eta: Fourier frequency dependent normalisation ratio C1(vc) / C2(vc)
+        ! See Lucchini et al. 2023 for details.
+        double precision :: eta
+
+        ! eta_0: Time-averaged normalisation ratio C1 / C2 between the continuum
+        ! of the two lampposts. It sets the continuum cutoff and disc
+        ! ionisation.
+        ! See Lucchini et al. 2023 for details.
+        double precision :: eta_0
+
+        ! Asymmetry parameter of angular emissivity function:
+        double precision :: qboost
+
+        ! Linear coefficient of angular emissivity function (b1) and quadratic
+        ! coefficient of angular emissivity function (b2):
+        double precision :: b1, b2
+
+        ! The below are computed from the above
+        ! The cosine angle
+        double precision :: muobs
     end type t_model_arguments
 
     type :: t_config
         integer :: verbose = 0
         ! firstcall: is this the first time the model has been called?
         logical :: firstcall = .true., needtrans = .true., needconv = .true.,test = .false.
+        ! me: Number of mue bins
+        ! xe: Number of logr bins: bins 1:xe-1 are logarithmically spaced, bin
+        ! xe is everything else
         integer :: me, xe, nex, m, ionvar, refvar
 
         ! TODO: are these really constants, or are they hidden variables?
-        ! constants
+        ! Constants
+
+        ! Relativistic grid size, i.e. pixel count splitting up the image plane
+        ! in polar coordinates.
         integer :: nphi = 200, nro = 200
+        ! Non-relativistic grid size:
+        integer :: nron = 100, nphin = 100
+
+        ! The number of time bins used for calculating the impulse response function:
+        integer :: nt = 2**9
+
         ! Emin, Emax: min and max of the internal energy grid
         ! (different from output grid)
         real :: Emin = 1e-2, Emax = 3e3, dyn = 0.0
@@ -35,8 +78,17 @@ module common_types
 
         real :: DeltaGamma = 0.01
 
+        ! Use ring-like coronal model. Should future models get added, this
+        ! could be promoted to an enumeration of some description.
+        logical :: ring_like = .false.
+
+        ! Toggle whether to calculate the impulse response or not. Since the
+        ! impulse response is not directly used in calculations, and must be
+        ! read out in another way, this defaults to false.
+        logical :: calculate_impulse_response = .false.
+
         ! internal frequency grid
-        ! number of frequency bins
+        ! Number of frequency bins
         integer :: nf
         real :: f, fac
         double precision :: fc, flo, fhi
@@ -58,7 +110,8 @@ module common_types
         ! variable for non linear effects
         integer :: DC, ionvariation
         real :: dlogxi1, dlogxi2
-    end type t_config
+
+     end type t_config
 
     type :: t_arrays
         ! earx: internal energy grid array (0:nex)
@@ -66,18 +119,30 @@ module common_types
         real, allocatable :: ReGbar(:), ImGbar(:)
         real, allocatable :: contx(:,:)
         double precision, allocatable :: contx_int(:)
-        ! lens needs to be allocatable to save it.
-        double precision, allocatable :: frobs(:), frrel(:)
         ! TRANSFER FUNCTIONS and Cross spectrum dynamic allocation + variables
         complex, dimension(:,:,:,:,:), allocatable :: ker_W0, ker_W1, ker_W2, ker_W3
+        ! ker_W0(nlp,ne,nf,me,xe) Transfer function W0 - linear transfer function
+        ! ker_W1(nlp,ne,nf,me,xe) Transfer function W1 - one aspect of photon index variations
+        ! ker_W2(nlp,ne,nf,me,xe) Transfer function W2 - other aspect of photon index variations
+        ! ker_W3(nlp,ne,nf,me,xe) Transfer function W3 - ionization variations
         real, dimension(:,:,:), allocatable :: ReW0, ImW0, ReW1, ImW1
         real, dimension(:,:,:), allocatable :: ReW2, ImW2, ReW3, ImW3
         real, dimension(:,:), allocatable :: ReSraw, ImSraw, ReSrawa, ImSrawa, ReGrawa, ImGrawa, ReG, ImG
     end type t_arrays
+
+    type(t_config), target, save :: global_config
 contains
+
+    subroutine reset_reltrans() bind(C, name="reset_reltrans")
+      !The routine reset the check variables, in order to force
+      ! a fresh start of the model
+      global_config%firstcall = .true.
+    end subroutine reset_reltrans
+  
 
     ! Unwraps the arguments from a parameter array into `args`.
     subroutine unwrap_arguments(args, nlp, dset, params, cutoff_powerlaw)
+        double precision, parameter :: pi = acos(-1.d0)
         integer, intent(in) :: nlp, dset, cutoff_powerlaw
         real, target, intent(in) :: params(32)
         type(t_model_arguments), intent(out) :: args
@@ -87,18 +152,21 @@ contains
             args%g(i) = params(28 + (i - 1) * nlp)
         end do
         if (dset .eq. 1) then
-            args%Dkpc = params(9)
+           args%Dkpc = params(9)
+           args%logxi = 0.0
+        else
+           args%logxi = params(9)
         end if
         args%h(1) = dble(params(1))
         args%h(2) = dble(params(2))
         args%nlp = nlp
         args%a = dble(params(3))
         args%inc = dble(params(4))
+        args%muobs = cos(args%inc * pi / 180.d0)
         args%rin = dble(params(5))
         args%rout = dble(params(6))
         args%zcos = dble(params(7))
         args%Gamma = dble(params(8))
-        args%logxi = params(9)
         args%Afe = params(10)
         args%lognep = params(11)
         args%Cutoff_s = params(12)
@@ -162,7 +230,7 @@ contains
         use env_variables, only: adensity, idum
         use xillver_tables, only: path_tables, xillver, xillverDCp,pathname_xillver, pathname_xillverDCp
         type(t_config), intent(inout) :: config
-        integer :: get_env_int
+        integer :: get_env_int, temp_test
         character (len=200) :: get_env_char
         config%me = get_env_int("MU_ZONES", 1)
         config%xe = get_env_int("ION_ZONES", 20)
@@ -183,6 +251,13 @@ contains
         ! decide between zone A density profile or constant density profile
         adensity = max(min(get_env_int("A_DENSITY", 0), 1), 0)
 
+        temp_test = get_env_int("TEST_RUN", 0)
+        if (temp_test .eq. 0) then
+           config%test = .false.
+        else
+           config%test = .true.
+        end if
+        
         ! this is from xillver_tables, sets the paths where the tables are read
         ! from
         path_tables = get_env_char("RELTRANS_TABLES", './')
@@ -216,10 +291,15 @@ contains
         integer, intent(in) :: nlp
         integer :: i
 
+        if (allocated(arrays%earx  )) deallocate(arrays%earx  )
+        if (allocated(arrays%ReGbar)) deallocate(arrays%ReGbar)
+        if (allocated(arrays%ImGbar)) deallocate(arrays%ImGbar)
         allocate(arrays%earx(0:nex))
         allocate(arrays%ReGbar(nex))
         allocate(arrays%ImGbar(nex))
 
+        if (allocated(arrays%contx    )) deallocate(arrays%contx    )
+        if (allocated(arrays%contx_int)) deallocate(arrays%contx_int)
         allocate(arrays%contx(nex,nlp))
         allocate(arrays%contx_int(nlp))
 
@@ -259,7 +339,7 @@ contains
                     *(model_args%fhiHz                                         &
                     / model_args%floHz)**(real(i) / real(config%nf))
             end do
-
+            
             ! reallocate the transfer function arrays
             if (allocated(arrays%ker_W0)) deallocate(arrays%ker_W0)
             allocate(arrays%ker_W0(model_args%nlp,nex,config%nf,config%me,config%xe))
